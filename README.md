@@ -62,21 +62,6 @@
 
 ---
 
-## **📂 Structure du Projet**  
-```plaintext
-projet_mlops/
-├── data/                # Données versionnées (DVC)
-├── models/              # Modèles et métriques
-├── notebooks/           # Exploration (EDA, prototypes)
-├── src/                 # Code source
-│   ├── api/            # FastAPI
-│   ├── training/       # Scripts d'entraînement
-│   └── monitoring/     # Détection de drift
-├── .github/            # CI/CD
-└── README.md           # Documentation
-```
-
----
 
 ## **🚀 Comment Démarrer**  
 1. Cloner le dépôt :  
