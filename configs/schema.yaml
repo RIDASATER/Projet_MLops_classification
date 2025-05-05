@@ -1,0 +1,8 @@
+features:
+  text:
+    type: str
+    required: true
+  label:
+    type: str  # ou int selon votre cas
+    required: true
+    allowed_values: ["classe1", "classe2"]  # À adapter à vos classes

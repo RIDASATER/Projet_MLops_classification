@@ -1,0 +1,7 @@
+data:
+  raw_data_path: "data/raw/Dataset.csv"
+  processed_data_path: "data/processed/processed_data.csv"
+  
+logging:
+  log_dir: "logs/"
+  log_file: "data_ingestion.log"
