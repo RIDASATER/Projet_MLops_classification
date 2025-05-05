@@ -3,6 +3,6 @@ features:
     type: str
     required: true
   label:
-    type: str  # ou int selon votre cas
+    type: int
     required: true
-    allowed_values: ["classe1", "classe2"]  # À adapter à vos classes
+    allowed_values: [0, 1]  # À adapter

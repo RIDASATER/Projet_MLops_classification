@@ -1,19 +1,12 @@
-from .data_access.local_storage import load_data, save_data
-from .logger import logging
-import os
+import pandas as pd
+from pathlib import Path
 
-def load_dataset(config_path: str) -> pd.DataFrame:
-    """Charge le dataset brut selon la configuration"""
-    try:
-        config = load_config(config_path)
-        raw_data_path = config['data']['raw_data_path']
-        
-        logging.info(f"Chargement des données depuis {raw_data_path}")
-        df = load_data(raw_data_path)
-        
-        logging.info(f"Données chargées avec succès. Shape: {df.shape}")
-        return df
-        
-    except Exception as e:
-        logging.error(f"Erreur dans data_ingestion: {str(e)}")
-        raise e
+def load_data(config_path: str) -> pd.DataFrame:
+    """Charge les données depuis le chemin spécifié dans config.yaml"""
+    import yaml
+    
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    
+    data_path = Path(config['data']['raw_path'])
+    return pd.read_csv(data_path)
