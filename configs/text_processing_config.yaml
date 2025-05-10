@@ -1,13 +1,30 @@
-spacy:
-  model_name: "fr_core_news_sm"
-  disable: ["parser", "ner"]
+# Choix du framework
+use_huggingface: false  # true pour utiliser Hugging Face
 
+# Configuration SpaCy
+spacy:
+  model_name: "fr_core_news_md"  # Modèle moyen pour meilleure précision
+  disable: ["parser", "ner", "textcat"]
+
+# Configuration Hugging Face
+huggingface:
+  model_name: "camembert-base"
+
+# Nettoyage
 cleaning:
   remove_urls: true
   remove_mentions: true
   remove_punctuation: true
   lowercase: true
+  remove_numbers: true
 
+# Stopwords personnalisés
+custom_stopwords:
+  - "voilà"
+  - "etc"
+  - "cad"
+
+# Performance
 performance:
   batch_size: 256
   cache_model: true
