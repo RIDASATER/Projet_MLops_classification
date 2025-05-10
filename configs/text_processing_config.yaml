@@ -1,0 +1,13 @@
+spacy:
+  model_name: "fr_core_news_sm"
+  disable: ["parser", "ner"]
+
+cleaning:
+  remove_urls: true
+  remove_mentions: true
+  remove_punctuation: true
+  lowercase: true
+
+performance:
+  batch_size: 256
+  cache_model: true
