@@ -1,0 +1,4 @@
+[core]
+    remote = dvc-storage-service
+['remote "dvc-storage-service"']
+    url = ../dvc-storage-service@affable-grin-459313-f2.iam.gserviceaccount.com
