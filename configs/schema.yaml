@@ -1,8 +1,3 @@
-features:
-  text:
-    type: str
-    required: true
-  label:
-    type: int
-    required: true
-    allowed_values: [0, 1]  # À adapter
+# configs/schema.yaml - Version corrigée
+text_column: "text"       # Doit correspondre au nom de colonne dans vos données
+target_column: "label"    # Doit correspondre au nom de colonne dans vos données

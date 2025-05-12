@@ -1,0 +1,20 @@
+# configs/config.yaml
+paths:
+  raw_data: "data/raw/Dataset.csv"
+  processed_data: "data/processed/cleaned_data.csv"
+  train_data: "data/processed/train.csv"
+  test_data: "data/processed/test.csv"
+  augmented_data: "data/augmented/augmented_{date}.csv"
+  vectorizer: "artifacts/vectorizers/tfidf_vectorizer.pkl"
+  artifacts_dir: "artifacts/"
+
+processing:
+  batch_size: 512
+  max_workers: 4
+  text:
+    min_token_length: 2
+    remove_stopwords: true
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "SentimentAnalysis"

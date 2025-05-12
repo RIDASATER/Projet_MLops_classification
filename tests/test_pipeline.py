@@ -1,6 +1,12 @@
 import pytest
-from data_ingestion import DataStreamer
-from text_processing import AdvancedTextCleaner
+import sys
+from pathlib import Path
+
+# Ajouter le chemin de 'src' au PYTHONPATH
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
+
+from text_classification_mlops.components.data_ingestion import DataStreamer
+from text_classification_mlops.components.text_processing import AdvancedTextCleaner
 import yaml
 from pathlib import Path
 
@@ -33,7 +39,7 @@ def test_text_processing():
 
 def test_full_pipeline_integration():
     """Test d'intégration complet"""
-    from training_pipeline import run_pipeline
+    from text_classification_mlops.pipeline.training_pipeline import run_pipeline
     try:
         run_pipeline()
         assert Path("artifacts/vectorizers/tfidf_vectorizer.pkl").exists()
