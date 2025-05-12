@@ -4,208 +4,183 @@ import yaml
 from pathlib import Path
 import sys
 import os
+import numpy as np
 from contextlib import nullcontext
 from typing import Dict, Any
+from mlflow.models.signature import infer_signature
+from mlflow.pyfunc import PythonModel
+import mlflow.sklearn
+from sklearn.linear_model import SGDClassifier
+from sklearn.model_selection import train_test_split
+import pandas as pd  # Import pandas to load CSV
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import accuracy_score
 
-# Configuration des imports absolus
+
+# Configuration for absolute imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
-from text_classification_mlops.components.data_ingestion import DataStreamer
-from text_classification_mlops.components.data_preprocessing import BatchProcessor
-from text_classification_mlops.components.feature_engineering import StreamingVectorizer
-from text_classification_mlops.components.model_trainer import StreamingTrainer
-from text_classification_mlops.components.text_processing import TextPreprocessor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ConfigError(Exception):
-    """Exception personnalisée pour les erreurs de configuration"""
+    """Custom exception for configuration errors"""
     pass
 
-def load_config(path: str = "configs/training_config.yaml"):
-    ...
-    """Charge et fusionne toutes les configurations avec gestion des erreurs améliorée"""
-    config_files = {
-        'global': 'configs/config.yaml',
-        'model': 'configs/params.yaml',
-        'training': 'configs/training_config.yaml',
-        'text_processing': 'configs/text_processing_config.yaml',
-        'schema': 'configs/schema.yaml'
-    }
-    config = {}
-    for name, file_path in config_files.items():
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                config[name] = yaml.safe_load(f) or {}
-                logger.debug(f"Configuration chargée depuis {file_path}")
-        except FileNotFoundError:
-            logger.warning(f"Fichier de configuration {file_path} non trouvé")
-            config[name] = {}
-        except yaml.YAMLError as e:
-            logger.error(f"Erreur YAML dans {file_path}: {str(e)}")
-            raise ConfigError(f"Erreur dans le fichier de configuration {file_path}")
-        except Exception as e:
-            logger.error(f"Erreur inattendue lors du chargement de {file_path}: {str(e)}")
-            raise ConfigError(f"Impossible de charger {file_path}")
+class TextClassificationWrapper(PythonModel):
+    """MLflow wrapper for text classification model"""
+    def __init__(self, model, vectorizer, processor):
+        self.model = model
+        self.vectorizer = vectorizer
+        self.processor = processor
 
-    # Configuration par défaut critique
-    defaults = {
-        'paths': {
-            'artifacts_dir': 'artifacts/',
-            'vectorizer': 'artifacts/vectorizer.pkl',
-            'model': 'artifacts/model.joblib'
-        },
-        'training': {
-            'log_interval': 1000,
-            'batch_size': 512
-        },
-        'text_processing': {
-            'framework': {
-                'active': 'spacy'
-            }
-        }
-    }
-    # Fusion structurée avec validation
-    required_sections = {
-        'schema': ['text_column', 'target_column'],
-        'model': ['type', 'params']
-    }
-    
-    merged_config = {
-        'paths': {**defaults['paths'], **config['global'].get('paths', {})},
-        'mlflow': config['global'].get('mlflow', {}),
-        'model': config['model'],
-        'training': {**defaults['training'], **config['training']},
-        'text_processing': {**defaults['text_processing'], **config['text_processing']},
-        'schema': config['schema']
-    }
+    def predict(self, context, model_input):
+        processed_text = self.processor.process_batch(model_input.iloc[:, 0].tolist())
+        features = self.vectorizer.transform(processed_text)
+        return self.model.predict(features)
 
-    # Validation des sections requises
-    for section, required_keys in required_sections.items():
-        if not merged_config.get(section):
-            raise ConfigError(f"Section de configuration manquante: {section}")
-        for key in required_keys:
-            if key not in merged_config[section]:
-                raise ConfigError(f"Clé de configuration manquante: {section}.{key}")
-
-    return merged_config
+def load_config(path: str = None) -> Dict[str, Any]:
+    """Load and merge all configurations with enhanced error handling"""
+    try:
+        if path is None:
+            path = os.path.join(os.path.abspath(os.path.dirname(__file__)), '..', '..', '..', 'configs', 'training_config.yaml')
+        
+        logger.info(f"Loading configuration from {path}")
+        with open(path, 'r') as file:
+            config = yaml.safe_load(file)
+        return config
+    except FileNotFoundError:
+        logger.error(f"Configuration file not found: {path}")
+        raise ConfigError(f"Configuration not found: {path}")
+    except yaml.YAMLError as e:
+        logger.error(f"YAML parsing error in {path}: {str(e)}")
+        raise ConfigError(f"YAML parsing error: {str(e)}")
 
 def ensure_paths_exist(config: Dict[str, Any]) -> None:
-    """Crée les dossiers nécessaires avec gestion d'erreurs améliorée"""
-    required_paths = {
-        'raw_data': config['paths']['raw_data'],
-        'processed_data': config['paths']['processed_data'],
-        'artifacts': config['paths']['artifacts_dir'],
-        'vectorizer': Path(config['paths']['vectorizer']).parent
-    }
-    
-    for name, path in required_paths.items():
-        try:
-            path_obj = Path(path)
-            if name in ['raw_data', 'processed_data']:
-                if not path_obj.exists():
-                    raise FileNotFoundError(f"Fichier {name} introuvable: {path}")
-            else:
-                path_obj.mkdir(parents=True, exist_ok=True)
-                logger.debug(f"Dossier {name} vérifié/créé: {path}")
-        except Exception as e:
-            logger.error(f"Erreur avec le chemin {name}: {str(e)}")
-            raise
+    """Create necessary directories with improved error handling"""
+    for key, path in config.get('paths', {}).items():
+        directory = Path(path)
+        if not directory.exists():
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Directory created: {path}")
+            except Exception as e:
+                logger.error(f"Error creating directory {path}: {str(e)}")
+                raise
 
 def initialize_mlflow(config: Dict[str, Any]):
-    """Initialise MLflow avec gestion des erreurs"""
+    """Initialize MLflow with error handling"""
     mlflow_config = config.get('mlflow', {})
     if not mlflow_config.get('tracking_uri'):
-        logger.warning("MLflow désactivé - aucun suivi ne sera enregistré")
+        logger.warning("MLflow disabled - no tracking will be recorded")
         return nullcontext()
     
     try:
-        mlflow.set_tracking_uri(mlflow_config['tracking_uri'])
-        mlflow.set_experiment(mlflow_config.get('experiment_name', 'text-classification'))
-        run = mlflow.start_run()
-        logger.info("MLflow activé - suivi des expériences")
+        mlflow.set_tracking_uri("http://localhost:5000")  # Or any other local path
+        experiment_name = mlflow_config.get('experiment_name', 'text-classification')
+        mlflow.set_experiment(experiment_name)
         
-        # Log des configurations
+        run_name = mlflow_config.get('run_name', f"{config['model']['type']}-streaming")
+        run = mlflow.start_run(run_name=run_name)
+        
+        mlflow.set_tags({
+            "project": "text-classification",
+            "team": "rida",
+            "framework": config['text_processing']['framework']['active'],
+            "streaming": "true",
+            "data_version": config.get('data_version', '1.0')
+        })
+        
+        logger.info(f"MLflow enabled - Experiment: {experiment_name}, Run: {run_name}")
+        
+        # Log configurations
         for config_file in ['config.yaml', 'params.yaml', 'training_config.yaml']:
             config_path = Path(f"configs/{config_file}")
             if config_path.exists():
-                mlflow.log_artifact(str(config_path))
+                mlflow.log_artifact(str(config_path), "configs")
         
         return run
     except Exception as e:
-        logger.error(f"Échec de l'initialisation MLflow: {str(e)}")
+        logger.error(f"MLflow initialization failed: {str(e)}")
         return nullcontext()
 
-def run_pipeline():
-    """Exécute le pipeline complet de formation en streaming."""
+def log_batch_metrics(trainer, X_batch, y_batch, batch_idx):
+    """Log metrics for a training batch"""
+    if not mlflow.active_run():
+        return
+        
     try:
-        # Chargement et validation de la configuration
+        predictions = trainer.predict(X_batch)
+        accuracy = np.mean(predictions == y_batch)
+        
+        mlflow.log_metrics({
+            'batch/accuracy': accuracy,
+            'batch/loss': trainer.current_loss,
+            'batch/size': len(y_batch)
+        }, step=trainer.n_samples_seen)
+        
+        if batch_idx % 10 == 0:  # Every 10 batches
+            mlflow.log_metric('cumulative_samples', trainer.n_samples_seen)
+    except Exception as e:
+        logger.warning(f"Metrics logging failed: {str(e)}")
+
+def run_pipeline():
+    """Execute the complete streaming training pipeline."""
+    try:
+        # Load and validate configuration
         config = load_config()
         ensure_paths_exist(config)
         
-        # Initialisation MLflow
+        # Initialize MLflow
         with initialize_mlflow(config) as mlflow_context:
-            # Initialisation des composants
-            logger.info("Initialisation des composants du pipeline")
-            components = {
-                'streamer': DataStreamer(config['paths']),
-                'processor': BatchProcessor(config['text_processing']),
-                'vectorizer': StreamingVectorizer(config),
-                'trainer': StreamingTrainer(config['model'])
-            }
+            # Load your dataset
+            df = pd.read_csv('data/raw/Dataset.csv')  # Update with your local path
+            # Ensure the dataset has the necessary columns
+            if 'review' not in df.columns or 'sentiment' not in df.columns:
+                raise ValueError(f"Dataset must contain 'review' and 'sentiment' columns")
+
+            # Split data into training and testing sets
+            X_train, X_test, y_train, y_test = train_test_split(df['review'], df['sentiment'], test_size=0.2, random_state=42)
             
-            # Entraînement initial
-            logger.info("Phase d'initialisation du vectoriseur")
-            first_batch = next(components['streamer'].stream_batches())
-            texts = components['processor'].process_batch(
-                first_batch[config['schema']['text_column']].tolist()
+            # Create a pipeline with TfidfVectorizer and SGDClassifier
+            model_pipeline = make_pipeline(
+                TfidfVectorizer(),  # Convert text data to numeric using TF-IDF
+                SGDClassifier(loss="log_loss", penalty="l2", alpha=0.0001)
             )
-            components['vectorizer'].partial_fit(texts)
             
-            # Pipeline de streaming principal
-            logger.info("Démarrage du traitement en streaming")
-            for batch in components['streamer'].stream_batches():
-                # Nettoyage et vectorisation
-                processed_texts = components['processor'].process_batch(
-                    batch[config['schema']['text_column']].tolist()
-                )
-                X_batch = components['vectorizer'].transform(processed_texts)
-                y_batch = batch[config['schema']['target_column']].values
-                
-                # Entraînement
-                components['trainer'].partial_fit(X_batch, y_batch)
-                
-                # Logging périodique
-                if mlflow.active_run() and (components['trainer'].n_samples_seen % config['training']['log_interval'] == 0):
-                    mlflow.log_metrics({
-                        'batch_size': len(batch),
-                        'total_samples': components['trainer'].n_samples_seen
-                    })
+            # Train the model
+            model_pipeline.fit(X_train, y_train)
             
-            # Finalisation et sauvegarde
-            logger.info("Sauvegarde des artefacts finaux")
-            components['vectorizer'].save()
-            components['trainer'].save()
+            # Make predictions and evaluate
+            y_pred = model_pipeline.predict(X_test)
+            accuracy = accuracy_score(y_test, y_pred)
             
+            # Log metrics
             if mlflow.active_run():
-                mlflow.log_artifacts(config['paths']['artifacts_dir'])
-                mlflow.log_params({
-                    'total_samples': components['trainer'].n_samples_seen,
-                    'model_type': config['model']['type'],
-                    'text_processing': config['text_processing']['framework']['active']
-                })
+                mlflow.log_metric("test_accuracy", accuracy)
+                
+                # Log the model
+                signature = infer_signature(X_test[:1], model_pipeline.predict(X_test[:1]))
+                mlflow.sklearn.log_model(
+                    model_pipeline,
+                    "model",
+                    signature=signature,
+                    registered_model_name="TextClassifier"
+                )
+                
+                logger.info(f"Model registered in MLflow with run ID: {mlflow.active_run().info.run_id}")
                 
     except ConfigError as e:
-        logger.error(f"Erreur de configuration: {str(e)}")
+        logger.error(f"Configuration error: {str(e)}")
         raise
     except Exception as e:
-        logger.error(f"Échec du pipeline: {str(e)}", exc_info=True)
+        logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
         raise
     finally:
         if mlflow.active_run():
             mlflow.end_run()
-        logger.info("Exécution du pipeline terminée")
-
+        logger.info("Pipeline execution completed")
+        
 if __name__ == "__main__":
     run_pipeline()
