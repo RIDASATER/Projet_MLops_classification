@@ -1,0 +1,7 @@
+artifact_location: mlflow-artifacts:/759970782747169164
+creation_time: 1747058004940
+experiment_id: '759970782747169164'
+last_update_time: 1747058009697
+lifecycle_stage: deleted
+name: SentimentAnalysis
+tags: {}
