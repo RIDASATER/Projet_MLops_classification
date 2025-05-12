@@ -23,7 +23,8 @@ class ConfigError(Exception):
     """Exception personnalisée pour les erreurs de configuration"""
     pass
 
-def load_config() -> Dict[str, Any]:
+def load_config(path: str = "configs/training_config.yaml"):
+    ...
     """Charge et fusionne toutes les configurations avec gestion des erreurs améliorée"""
     config_files = {
         'global': 'configs/config.yaml',
@@ -32,7 +33,6 @@ def load_config() -> Dict[str, Any]:
         'text_processing': 'configs/text_processing_config.yaml',
         'schema': 'configs/schema.yaml'
     }
-    
     config = {}
     for name, file_path in config_files.items():
         try:
@@ -66,7 +66,6 @@ def load_config() -> Dict[str, Any]:
             }
         }
     }
-
     # Fusion structurée avec validation
     required_sections = {
         'schema': ['text_column', 'target_column'],

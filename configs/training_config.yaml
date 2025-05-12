@@ -1,13 +1,12 @@
 model:
-  type: "SGDClassifier"
+  type: "LogisticRegression"
   params:
-    loss: "log_loss"     # Pour classification
+    loss: "log_loss"
     penalty: "l2"
     alpha: 0.0001
     max_iter: 1000
     random_state: 42
 
-# configs/training_config.yaml
 training:
   batch_size: 512
   epochs: 10
@@ -17,4 +16,4 @@ training:
   log_interval: 100
 
 logging:
-  batch_interval: 10  # Nombre de batches entre chaque log
+  batch_interval: 10
