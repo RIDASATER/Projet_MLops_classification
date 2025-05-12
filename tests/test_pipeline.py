@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 
 from text_classification_mlops.components.data_ingestion import DataStreamer
-from text_classification_mlops.components.text_processing import AdvancedTextCleaner
+from text_classification_mlops.components.text_processing import TextPreprocessor
 import yaml
 from pathlib import Path
 
@@ -28,7 +28,7 @@ def test_data_streamer():
 
 def test_text_processing():
     """Teste le nettoyage de texte"""
-    cleaner = AdvancedTextCleaner()
+    cleaner = TextPreprocessor()
     test_cases = [
         ("Bonjour @test !", "bonjour"),
         ("http://example.com", ""),
