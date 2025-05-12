@@ -33,6 +33,13 @@ dvc>=3.0.0
 # ===========================
 Flask
 Flask-Cors
+fastapi
+uvicorn[standard]
+python-jose
+pydantic
+scikit-learn
+joblib
+
 
 # ===========================
 # Jupyter & Notebook
