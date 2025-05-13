@@ -18,6 +18,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import psutil
+from joblib import dump
 
 # Configuration for absolute imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -81,11 +82,11 @@ def create_model(model_type: str, config: Dict[str, Any]):
         )
     elif model_type == 'svm':
         logger.info("Creating SVM model with optimized settings")
-        return LinearSVC(  # Using LinearSVC instead of SVC for better performance
+        return LinearSVC(
             C=model_params.get('C', 1.0),
             max_iter=model_params.get('max_iter', 500),
             random_state=42,
-            dual=False  # Better for n_samples > n_features
+            dual=False
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")
@@ -106,7 +107,6 @@ def train_model(model_type: str, pipeline, X_train, y_train):
     start_time = time.time()
     
     if model_type == 'svm':
-        # For SVM, train on subset if data is large
         if len(X_train) > 10000:
             X_train, _, y_train, _ = train_test_split(
                 X_train, y_train, 
@@ -123,16 +123,13 @@ def train_model(model_type: str, pipeline, X_train, y_train):
 def log_to_mlflow(model_type: str, pipeline, metrics, train_time, X_test):
     """Log all results to MLflow"""
     with mlflow.start_run(run_name=f"{model_type}-run", nested=True):
-        # Log parameters
         mlflow.log_params({
             "model_type": model_type,
             "training_time": train_time
         })
         
-        # Log metrics
         mlflow.log_metrics(metrics)
         
-        # Log model
         signature = infer_signature(X_test[:1], pipeline.predict(X_test[:1]))
         mlflow.sklearn.log_model(
             pipeline,
@@ -142,46 +139,53 @@ def log_to_mlflow(model_type: str, pipeline, metrics, train_time, X_test):
         )
         logger.info(f"Logged {model_type} model to MLflow")
 
-def run_pipeline():
-    """Main training pipeline with enhanced SVM support"""
+def export_logistic_regression(pipeline):
+    """Export logistic regression model using joblib"""
     try:
-        # Load config and check resources
+        model_path = 'models/logistic_regression_model.joblib'
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        dump(pipeline, model_path)
+        logger.info(f"Logistic Regression model exported to {model_path}")
+    except Exception as e:
+        logger.error(f"Failed to export logistic regression model: {str(e)}")
+        raise
+
+def run_pipeline():
+    """Main training pipeline"""
+    try:
         config = load_config()
         log_system_resources()
         
-        # Load data
         df = pd.read_csv('data/raw/Dataset.csv')
         if 'review' not in df.columns or 'sentiment' not in df.columns:
             raise ValueError("Dataset must contain 'review' and 'sentiment' columns")
         
-        # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             df['review'], df['sentiment'], test_size=0.2, random_state=42
         )
         
-        # Initialize MLflow
         mlflow.set_tracking_uri("http://localhost:5000")
         experiment_name = "text-classification-comparison"
         mlflow.set_experiment(experiment_name)
         
-        # Train all models
         for model_type in ['sgd', 'logistic_regression', 'svm']:
             try:
                 logger.info(f"\n{'='*50}\nTraining {model_type}\n{'='*50}")
                 
-                # Create pipeline
                 pipeline = make_pipeline(
                     TfidfVectorizer(),
                     create_model(model_type, config)
                 )
                 
-                # Train and evaluate
                 pipeline, train_time = train_model(model_type, pipeline, X_train, y_train)
                 metrics = evaluate_model(pipeline, X_test, y_test)
                 
-                # Log results
                 log_to_mlflow(model_type, pipeline, metrics, train_time, X_test)
                 
+                # Export only logistic regression
+                if model_type == 'logistic_regression':
+                    export_logistic_regression(pipeline)
+                    
             except Exception as e:
                 logger.error(f"Failed to train {model_type}: {str(e)}")
                 mlflow.log_text(str(e), f"{model_type}_error.log")
