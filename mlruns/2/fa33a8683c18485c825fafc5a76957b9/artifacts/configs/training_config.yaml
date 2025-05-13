@@ -1,0 +1,17 @@
+mlflow:
+  tracking_uri: "http://127.0.0.1:5000"
+  experiment_name: "text-classification"
+
+paths:
+  raw_data: "data/raw/Dataset.csv"
+
+model:
+  type: "SGDClassifier"
+  params:
+    loss: "log_loss"
+    penalty: "l2"
+    alpha: 0.0001
+
+text_processing:
+  framework:
+    active: "sklearn"

@@ -4,19 +4,20 @@ import yaml
 from pathlib import Path
 import sys
 import os
+import time
 import numpy as np
 from contextlib import nullcontext
 from typing import Dict, Any
 from mlflow.models.signature import infer_signature
-from mlflow.pyfunc import PythonModel
 import mlflow.sklearn
-from sklearn.linear_model import SGDClassifier
+from sklearn.linear_model import SGDClassifier, LogisticRegression
+from sklearn.svm import SVC, LinearSVC
 from sklearn.model_selection import train_test_split
-import pandas as pd  # Import pandas to load CSV
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import make_pipeline
-from sklearn.metrics import accuracy_score
-
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import psutil
 
 # Configuration for absolute imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -28,18 +29,6 @@ class ConfigError(Exception):
     """Custom exception for configuration errors"""
     pass
 
-class TextClassificationWrapper(PythonModel):
-    """MLflow wrapper for text classification model"""
-    def __init__(self, model, vectorizer, processor):
-        self.model = model
-        self.vectorizer = vectorizer
-        self.processor = processor
-
-    def predict(self, context, model_input):
-        processed_text = self.processor.process_batch(model_input.iloc[:, 0].tolist())
-        features = self.vectorizer.transform(processed_text)
-        return self.model.predict(features)
-
 def load_config(path: str = None) -> Dict[str, Any]:
     """Load and merge all configurations with enhanced error handling"""
     try:
@@ -49,138 +38,160 @@ def load_config(path: str = None) -> Dict[str, Any]:
         logger.info(f"Loading configuration from {path}")
         with open(path, 'r') as file:
             config = yaml.safe_load(file)
+        
+        # Set default SVM config if not present
+        if 'svm' not in config.get('models', {}):
+            config['models']['svm'] = {
+                'kernel': 'linear',
+                'C': 1.0,
+                'max_iter': 500,
+                'cache_size': 1000
+            }
+            
         return config
-    except FileNotFoundError:
-        logger.error(f"Configuration file not found: {path}")
-        raise ConfigError(f"Configuration not found: {path}")
-    except yaml.YAMLError as e:
-        logger.error(f"YAML parsing error in {path}: {str(e)}")
-        raise ConfigError(f"YAML parsing error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Configuration error: {str(e)}")
+        raise ConfigError(f"Configuration error: {str(e)}")
 
-def ensure_paths_exist(config: Dict[str, Any]) -> None:
-    """Create necessary directories with improved error handling"""
-    for key, path in config.get('paths', {}).items():
-        directory = Path(path)
-        if not directory.exists():
-            try:
-                directory.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Directory created: {path}")
-            except Exception as e:
-                logger.error(f"Error creating directory {path}: {str(e)}")
-                raise
+def log_system_resources():
+    """Log system resources before training"""
+    mem = psutil.virtual_memory()
+    logger.info(f"Memory Available: {mem.available / (1024**3):.2f} GB")
+    logger.info(f"CPU Cores: {psutil.cpu_count()}")
 
-def initialize_mlflow(config: Dict[str, Any]):
-    """Initialize MLflow with error handling"""
-    mlflow_config = config.get('mlflow', {})
-    if not mlflow_config.get('tracking_uri'):
-        logger.warning("MLflow disabled - no tracking will be recorded")
-        return nullcontext()
+def create_model(model_type: str, config: Dict[str, Any]):
+    """Create model with SVM-specific optimizations"""
+    model_params = config['models'].get(model_type, {})
     
-    try:
-        mlflow.set_tracking_uri("http://localhost:5000")  # Or any other local path
-        experiment_name = mlflow_config.get('experiment_name', 'text-classification')
-        mlflow.set_experiment(experiment_name)
-        
-        run_name = mlflow_config.get('run_name', f"{config['model']['type']}-streaming")
-        run = mlflow.start_run(run_name=run_name)
-        
-        mlflow.set_tags({
-            "project": "text-classification",
-            "team": "rida",
-            "framework": config['text_processing']['framework']['active'],
-            "streaming": "true",
-            "data_version": config.get('data_version', '1.0')
+    if model_type == 'sgd':
+        return SGDClassifier(
+            loss="log_loss",
+            penalty=model_params.get('penalty', 'l2'),
+            alpha=model_params.get('alpha', 0.0001),
+            max_iter=model_params.get('max_iter', 1000),
+            random_state=42
+        )
+    elif model_type == 'logistic_regression':
+        return LogisticRegression(
+            penalty=model_params.get('penalty', 'l2'),
+            C=model_params.get('C', 1.0),
+            max_iter=model_params.get('max_iter', 1000),
+            solver=model_params.get('solver', 'lbfgs'),
+            random_state=42
+        )
+    elif model_type == 'svm':
+        logger.info("Creating SVM model with optimized settings")
+        return LinearSVC(  # Using LinearSVC instead of SVC for better performance
+            C=model_params.get('C', 1.0),
+            max_iter=model_params.get('max_iter', 500),
+            random_state=42,
+            dual=False  # Better for n_samples > n_features
+        )
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+
+def evaluate_model(model, X_test, y_test):
+    """Evaluate model and return comprehensive metrics"""
+    y_pred = model.predict(X_test)
+    return {
+        'accuracy': accuracy_score(y_test, y_pred),
+        'precision': precision_score(y_test, y_pred, average='weighted'),
+        'recall': recall_score(y_test, y_pred, average='weighted'),
+        'f1': f1_score(y_test, y_pred, average='weighted')
+    }
+
+def train_model(model_type: str, pipeline, X_train, y_train):
+    """Train model with progress logging"""
+    logger.info(f"Training {model_type} model...")
+    start_time = time.time()
+    
+    if model_type == 'svm':
+        # For SVM, train on subset if data is large
+        if len(X_train) > 10000:
+            X_train, _, y_train, _ = train_test_split(
+                X_train, y_train, 
+                train_size=10000, 
+                random_state=42
+            )
+            logger.info("Using subset of 10,000 samples for SVM training")
+    
+    pipeline.fit(X_train, y_train)
+    train_time = time.time() - start_time
+    logger.info(f"{model_type} trained in {train_time:.2f} seconds")
+    return pipeline, train_time
+
+def log_to_mlflow(model_type: str, pipeline, metrics, train_time, X_test):
+    """Log all results to MLflow"""
+    with mlflow.start_run(run_name=f"{model_type}-run", nested=True):
+        # Log parameters
+        mlflow.log_params({
+            "model_type": model_type,
+            "training_time": train_time
         })
         
-        logger.info(f"MLflow enabled - Experiment: {experiment_name}, Run: {run_name}")
+        # Log metrics
+        mlflow.log_metrics(metrics)
         
-        # Log configurations
-        for config_file in ['config.yaml', 'params.yaml', 'training_config.yaml']:
-            config_path = Path(f"configs/{config_file}")
-            if config_path.exists():
-                mlflow.log_artifact(str(config_path), "configs")
-        
-        return run
-    except Exception as e:
-        logger.error(f"MLflow initialization failed: {str(e)}")
-        return nullcontext()
-
-def log_batch_metrics(trainer, X_batch, y_batch, batch_idx):
-    """Log metrics for a training batch"""
-    if not mlflow.active_run():
-        return
-        
-    try:
-        predictions = trainer.predict(X_batch)
-        accuracy = np.mean(predictions == y_batch)
-        
-        mlflow.log_metrics({
-            'batch/accuracy': accuracy,
-            'batch/loss': trainer.current_loss,
-            'batch/size': len(y_batch)
-        }, step=trainer.n_samples_seen)
-        
-        if batch_idx % 10 == 0:  # Every 10 batches
-            mlflow.log_metric('cumulative_samples', trainer.n_samples_seen)
-    except Exception as e:
-        logger.warning(f"Metrics logging failed: {str(e)}")
+        # Log model
+        signature = infer_signature(X_test[:1], pipeline.predict(X_test[:1]))
+        mlflow.sklearn.log_model(
+            pipeline,
+            "model",
+            signature=signature,
+            registered_model_name=f"TextClassifier_{model_type}"
+        )
+        logger.info(f"Logged {model_type} model to MLflow")
 
 def run_pipeline():
-    """Execute the complete streaming training pipeline."""
+    """Main training pipeline with enhanced SVM support"""
     try:
-        # Load and validate configuration
+        # Load config and check resources
         config = load_config()
-        ensure_paths_exist(config)
+        log_system_resources()
+        
+        # Load data
+        df = pd.read_csv('data/raw/Dataset.csv')
+        if 'review' not in df.columns or 'sentiment' not in df.columns:
+            raise ValueError("Dataset must contain 'review' and 'sentiment' columns")
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            df['review'], df['sentiment'], test_size=0.2, random_state=42
+        )
         
         # Initialize MLflow
-        with initialize_mlflow(config) as mlflow_context:
-            # Load your dataset
-            df = pd.read_csv('data/raw/Dataset.csv')  # Update with your local path
-            # Ensure the dataset has the necessary columns
-            if 'review' not in df.columns or 'sentiment' not in df.columns:
-                raise ValueError(f"Dataset must contain 'review' and 'sentiment' columns")
-
-            # Split data into training and testing sets
-            X_train, X_test, y_train, y_test = train_test_split(df['review'], df['sentiment'], test_size=0.2, random_state=42)
-            
-            # Create a pipeline with TfidfVectorizer and SGDClassifier
-            model_pipeline = make_pipeline(
-                TfidfVectorizer(),  # Convert text data to numeric using TF-IDF
-                SGDClassifier(loss="log_loss", penalty="l2", alpha=0.0001)
-            )
-            
-            # Train the model
-            model_pipeline.fit(X_train, y_train)
-            
-            # Make predictions and evaluate
-            y_pred = model_pipeline.predict(X_test)
-            accuracy = accuracy_score(y_test, y_pred)
-            
-            # Log metrics
-            if mlflow.active_run():
-                mlflow.log_metric("test_accuracy", accuracy)
+        mlflow.set_tracking_uri("http://localhost:5000")
+        experiment_name = "text-classification-comparison"
+        mlflow.set_experiment(experiment_name)
+        
+        # Train all models
+        for model_type in ['sgd', 'logistic_regression', 'svm']:
+            try:
+                logger.info(f"\n{'='*50}\nTraining {model_type}\n{'='*50}")
                 
-                # Log the model
-                signature = infer_signature(X_test[:1], model_pipeline.predict(X_test[:1]))
-                mlflow.sklearn.log_model(
-                    model_pipeline,
-                    "model",
-                    signature=signature,
-                    registered_model_name="TextClassifier"
+                # Create pipeline
+                pipeline = make_pipeline(
+                    TfidfVectorizer(),
+                    create_model(model_type, config)
                 )
                 
-                logger.info(f"Model registered in MLflow with run ID: {mlflow.active_run().info.run_id}")
+                # Train and evaluate
+                pipeline, train_time = train_model(model_type, pipeline, X_train, y_train)
+                metrics = evaluate_model(pipeline, X_test, y_test)
                 
-    except ConfigError as e:
-        logger.error(f"Configuration error: {str(e)}")
-        raise
+                # Log results
+                log_to_mlflow(model_type, pipeline, metrics, train_time, X_test)
+                
+            except Exception as e:
+                logger.error(f"Failed to train {model_type}: {str(e)}")
+                mlflow.log_text(str(e), f"{model_type}_error.log")
+                continue
+                
     except Exception as e:
         logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
         raise
     finally:
-        if mlflow.active_run():
-            mlflow.end_run()
-        logger.info("Pipeline execution completed")
-        
+        logger.info("Training pipeline completed")
+
 if __name__ == "__main__":
     run_pipeline()

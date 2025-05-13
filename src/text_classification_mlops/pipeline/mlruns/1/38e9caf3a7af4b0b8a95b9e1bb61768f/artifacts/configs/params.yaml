@@ -1,0 +1,12 @@
+train:
+  learning_rate: 0.001
+  batch_size: 32
+  epochs: 10
+# configs/params.yaml
+model:
+  type: "SGDClassifier"
+  params:
+    alpha: 0.0001
+    max_iter: 1000
+    penalty: 'l2'
+    loss: 'log_loss'  # Pour classification

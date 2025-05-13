@@ -1,0 +1,23 @@
+mlflow:
+  tracking_uri: "http://127.0.0.1:5000"
+  experiment_name: "SentimentAnalysis"
+  run_name: "initial-run"
+
+data_version: "1.2"  # For data versioning
+
+model:
+  type: "SGDClassifier"
+  params:
+    loss: "log_loss"
+    penalty: "l2"
+    alpha: 0.0001
+
+text_processing:
+  framework:
+    active: "spacy"
+
+paths:
+  raw_data: "data/raw/Data.csv"  # Path to your raw data
+  processed_data: "data/processed/"  # Path for processed data (ensure this exists)
+  
+batch_size: 512  # Default batch size for streaming data
