@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import joblib
 import os
+import time
 
 app = FastAPI()
 
@@ -22,6 +23,17 @@ async def get_form(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "prediction": None})
 
 @app.post("/", response_class=HTMLResponse)
-async def post_form(request: Request, text: str = Form(...)):
+async def post_prediction(request: Request, text: str = Form(...)):
+    start_time = time.time()
     prediction = model.predict([text])[0]
-    return templates.TemplateResponse("index.html", {"request": request, "prediction": prediction})
+    end_time = time.time()
+    duration_ms = round((end_time - start_time) * 1000, 2)  # temps en millisecondes
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "prediction": prediction,
+        "text_input": text,
+        "duration": duration_ms
+    })
+
+
+
