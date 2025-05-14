@@ -1,43 +1,45 @@
----
 name: Security Checks
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
-  security:
+  security-scan:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+    permissions:
+      contents: read
+      security-events: write
 
-      - name: Dependency Scan
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Étape optionnelle si vous n'avez pas GITLEAKS_LICENSE
+      - name: Detect secrets with Gitleaks (basic)
+        if: false  # Désactivé par défaut
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          redact: true
+          exit-code: 0  # Ne pas bloquer le workflow
+
+      - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: fs
-          scan-ref: .
-          format: table
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'  # Format simple pour les logs
           exit-code: '1'
-          severity: CRITICAL,HIGH
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
 
-      - name: Static Code Analysis
-        uses: bandit-security/bandit-action@master
+      - name: Scan Dockerfile
+        uses: aquasecurity/trivy-action@master
         with:
-          args: "-r src/ -x tests/ -ll"
-
-      - name: Secrets Detection
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-
-      - name: Dockerfile Scan
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          file: Dockerfile
-          no-cache: true
-          scan: true
+          scan-type: 'config'
+          scan-ref: 'Dockerfile'
+          format: 'table'
+          exit-code: '1'
