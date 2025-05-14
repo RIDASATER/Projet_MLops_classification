@@ -1,0 +1,30 @@
+pipeline {
+    agent any
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+    }
+    stages {
+        stage('Security Checks') {
+            steps {
+                script {
+                    // Analyse des dépendances avec Trivy
+                    sh 'trivy fs --security-checks vuln,config .'
+                    
+                    // Analyse statique avec Bandit
+                    sh 'bandit -r src/ -x tests/ -ll'
+                    
+                    // Détection des secrets avec gitleaks
+                    sh 'gitleaks detect -v --redact'
+                    
+                    // Scan du Dockerfile
+                    sh 'hadolint Dockerfile'
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: '**/trivy-report.txt,**/bandit-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+    }
+}

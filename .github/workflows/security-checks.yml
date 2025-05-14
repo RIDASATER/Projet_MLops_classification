@@ -1,0 +1,43 @@
+---
+name: Security Checks
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Dependency Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+
+      - name: Static Code Analysis
+        uses: bandit-security/bandit-action@master
+        with:
+          args: "-r src/ -x tests/ -ll"
+
+      - name: Secrets Detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+      - name: Dockerfile Scan
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: Dockerfile
+          no-cache: true
+          scan: true

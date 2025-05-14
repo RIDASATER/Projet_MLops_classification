@@ -173,3 +173,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 /Dataset.csv
+
+
+# Fichiers de rapports sécurité
+*-report.*
+trivy-results/
+bandit-results/
