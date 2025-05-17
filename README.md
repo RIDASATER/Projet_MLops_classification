@@ -1,5 +1,5 @@
 # **Projet MLOps : Classification de Texte**  
-**Pipeline complet pour l'entraînement, le déploiement et le monitoring de modèles de NLP.**  
+Pipeline complet pour l'entraînement, le déploiement et le monitoring de modèles de NLP.
 
 ## **📌 Objectifs**  
 - Mettre en place un pipeline MLOps **scalable et sécurisé** pour la classification de texte.  
